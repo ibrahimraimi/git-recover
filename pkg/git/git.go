@@ -105,3 +105,8 @@ func PushBranch(branchName string) error {
 	_, err := RunCommand("push", "-u", "origin", branchName)
 	return err
 }
+
+// GetCommitShow returns the commit details and diff
+func GetCommitShow(hash string) (string, error) {
+	return RunCommand("show", "--stat", "--patch", "--color=always", hash)
+}

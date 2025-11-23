@@ -5,6 +5,7 @@ import (
 	"git-recover/pkg/git"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -24,8 +25,12 @@ type Model struct {
 	cursor    int
 	state     State
 	textInput textinput.Model
+	viewport  viewport.Model
 	err       error
 	msg       string
+	ready     bool
+	width     int
+	height    int
 }
 
 func NewModel(commits []git.Commit) Model {
@@ -43,13 +48,44 @@ func NewModel(commits []git.Commit) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(textinput.Blink, m.updatePreview())
 }
 
+func (m Model) updatePreview() tea.Cmd {
+	return func() tea.Msg {
+		if len(m.commits) == 0 {
+			return nil
+		}
+		content, err := git.GetCommitShow(m.commits[m.cursor].Hash)
+		if err != nil {
+			return errMsg(err)
+		}
+		return previewMsg(content)
+	}
+}
+
+type previewMsg string
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmd tea.Cmd
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+		if !m.ready {
+			m.viewport = viewport.New(msg.Width/2, msg.Height-5)
+			m.viewport.HighPerformanceRendering = false
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width / 2
+			m.viewport.Height = msg.Height - 5
+		}
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -70,10 +106,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up", "k":
 				if m.cursor > 0 {
 					m.cursor--
+					cmds = append(cmds, m.updatePreview())
 				}
 			case "down", "j":
 				if m.cursor < len(m.commits)-1 {
 					m.cursor++
+					cmds = append(cmds, m.updatePreview())
 				}
 			case "enter":
 				m.state = StateInputBranch
@@ -93,11 +131,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.textInput, cmd = m.textInput.Update(msg)
-			return m, cmd
+			cmds = append(cmds, cmd)
+			return m, tea.Batch(cmds...)
 
 		case StateSuccess, StateError:
 			return m, tea.Quit
 		}
+
+	case previewMsg:
+		m.viewport.SetContent(string(msg))
 
 	case errMsg:
 		m.err = msg
@@ -108,7 +150,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = StateSuccess
 	}
 
-	return m, nil
+	m.viewport, cmd = m.viewport.Update(msg)
+	cmds = append(cmds, cmd)
+
+	return m, tea.Batch(cmds...)
 }
 
 type errMsg error
@@ -118,6 +163,7 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FAFAFA")).Background(lipgloss.Color("#7D56F4")).Padding(0, 1)
 	itemStyle     = lipgloss.NewStyle().PaddingLeft(2)
 	selectedStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170"))
+	viewStyle     = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("69"))
 )
 
 func (m Model) View() string {
@@ -127,28 +173,39 @@ func (m Model) View() string {
 	if m.state == StateSuccess {
 		return fmt.Sprintf("%s\nPress q to quit.", m.msg)
 	}
+	if !m.ready {
+		return "Initializing..."
+	}
 
-	s := titleStyle.Render("Git Recover") + "\n\n"
+	header := titleStyle.Render("Git Recover") + "\n\n"
 
-	if m.state == StateBrowsing {
+	// List View
+	var listContent string
+	if m.state == StateBrowsing || m.state == StateInputBranch {
 		for i, choice := range m.commits {
 			cursor := " "
 			if m.cursor == i {
 				cursor = ">"
-				s += selectedStyle.Render(fmt.Sprintf("%s %s - %s (%s)", cursor, choice.Hash[:7], choice.Message, choice.Date)) + "\n"
+				listContent += selectedStyle.Render(fmt.Sprintf("%s %s - %s (%s)", cursor, choice.Hash[:7], choice.Message, choice.Date)) + "\n"
 			} else {
-				s += itemStyle.Render(fmt.Sprintf("%s %s - %s (%s)", cursor, choice.Hash[:7], choice.Message, choice.Date)) + "\n"
+				listContent += itemStyle.Render(fmt.Sprintf("%s %s - %s (%s)", cursor, choice.Hash[:7], choice.Message, choice.Date)) + "\n"
 			}
 		}
-		s += "\nUse j/k to navigate, enter to recover, q to quit.\n"
-	} else if m.state == StateInputBranch {
-		s += fmt.Sprintf("Recovering commit %s\n\n", m.commits[m.cursor].Hash[:7])
-		s += "Enter new branch name:\n"
-		s += m.textInput.View()
-		s += "\n\n(esc to cancel, enter to confirm)\n"
-	} else if m.state == StateRecovering {
-		s += "Recovering...\n"
+		listContent += "\nUse j/k to navigate, enter to recover, q to quit.\n"
 	}
 
-	return s
+	if m.state == StateInputBranch {
+		listContent += fmt.Sprintf("\nRecovering commit %s\n", m.commits[m.cursor].Hash[:7])
+		listContent += "Enter new branch name:\n"
+		listContent += m.textInput.View()
+		listContent += "\n\n(esc to cancel, enter to confirm)\n"
+	} else if m.state == StateRecovering {
+		listContent += "Recovering...\n"
+	}
+
+	// Split View
+	leftView := lipgloss.NewStyle().Width(m.width / 2).Render(listContent)
+	rightView := viewStyle.Width(m.width/2 - 2).Height(m.height - 5).Render(m.viewport.View())
+
+	return lipgloss.JoinVertical(lipgloss.Left, header, lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView))
 }
