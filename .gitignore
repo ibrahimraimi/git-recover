@@ -11,6 +11,8 @@
 *.dll
 *.so
 *.dylib
+git-recover
+git-recover.exe
 
 # Test binary, built with `go test -c`
 *.test
