@@ -2,7 +2,10 @@
 
 Git Recover is a simple CLI tool written in Go that helps you recover accidentally deleted git branches. It scans for dangling commits and reflog entries to find lost work, presents them in an interactive TUI, and allows you to restore them to a new branch.
 
-<video src="https://res.cloudinary.com/dajnn3jbw/video/upload/v1763867184/git-recover-demo-II_ucznxo.mp4" autoplay loop muted controls></video>
+<!-- <video src="https://res.cloudinary.com/dajnn3jbw/video/upload/v1763867184/git-recover-demo-II_ucznxo.mp4" autoplay loop muted controls></video> -->
+
+> Click to open video demo
+> [![Git Recover Demo](https://i.pinimg.com/1200x/a2/e2/9f/a2e29fc13256aecd5f4b700fc53c3e7b.jpg)](https://res.cloudinary.com/dajnn3jbw/video/upload/v1763867184/git-recover-demo-II_ucznxo.mp4)
 
 ## Installation
 
